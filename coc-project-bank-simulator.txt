@@ -1,0 +1,114 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <math.h>
+
+#define MAX_CUSTOMERS 5000
+#define SIM_TIME 480  // 8 hours = 480 minutes
+#define MAX_TELLERS 5
+
+/* simple Poisson sampler (Knuth) */
+int poisson(double lambda) {
+    if (lambda <= 0.0) return 0;
+    double L = exp(-lambda);
+    int k = 0;
+    double p = 1.0;
+    while (p > L) {
+        k++;
+        double u = rand() / (RAND_MAX + 1.0);
+        p *= u;
+    }
+    return k - 1;
+}
+
+int main() {
+    int queue[MAX_CUSTOMERS];
+    int front = 0, rear = 0;
+    int teller_busy[MAX_TELLERS] = {0};
+    int wait_times[MAX_CUSTOMERS];
+    int total_wait = 0, max_wait = 0, served = 0;
+
+    double lambda;
+    int num_tellers;
+
+    printf("Enter average customers per minute (lambda, e.g. 0.6): ");
+    if (scanf("%lf", &lambda) != 1) return 1;
+    printf("Enter number of tellers (1-%d): ", MAX_TELLERS);
+    if (scanf("%d", &num_tellers) != 1) return 1;
+    if (num_tellers < 1) num_tellers = 1;
+    if (num_tellers > MAX_TELLERS) num_tellers = MAX_TELLERS;
+
+    srand((unsigned)time(NULL));
+
+    /* 1) Simulate 480 minutes with arrivals */
+    for (int minute = 0; minute < SIM_TIME; ++minute) {
+        /* generate K arrivals this minute using Poisson(lambda) */
+        int arrivals = poisson(lambda);
+        for (int a = 0; a < arrivals; ++a) {
+            if (rear >= MAX_CUSTOMERS) {
+                fprintf(stderr, "Queue overflow, increase MAX_CUSTOMERS\n");
+                break;
+            }
+            queue[rear++] = minute;  // store arrival time
+        }
+
+        /* each teller either continues or picks next customer */
+        for (int t = 0; t < num_tellers; ++t) {
+            if (teller_busy[t] > 0) {
+                teller_busy[t]--; /* working this minute */
+            }
+            if (teller_busy[t] == 0 && front < rear) { /* free and customer waiting */
+                int arrival_time = queue[front++];
+                int wait = minute - arrival_time;
+                wait_times[served++] = wait;
+                total_wait += wait;
+                if (wait > max_wait) max_wait = wait;
+                /* assign service time 2 or 3 minutes */
+                teller_busy[t] = 2 + (rand() % 2);
+                /* reduce by 1 because we count current minute as work already */
+                teller_busy[t]--; 
+                if (teller_busy[t] < 0) teller_busy[t] = 0;
+            }
+        }
+    }
+
+    /* 2) Drain queue: continue serving until queue empty and all tellers idle */
+    int minute = SIM_TIME;
+    while (front < rear) {
+        for (int t = 0; t < num_tellers; ++t) {
+            if (teller_busy[t] > 0) {
+                teller_busy[t]--;
+            }
+            if (teller_busy[t] == 0 && front < rear) {
+                int arrival_time = queue[front++];
+                int wait = minute - arrival_time;
+                wait_times[served++] = wait;
+                total_wait += wait;
+                if (wait > max_wait) max_wait = wait;
+                teller_busy[t] = 2 + (rand() % 2);
+                teller_busy[t]--; 
+                if (teller_busy[t] < 0) teller_busy[t] = 0;
+            }
+        }
+        minute++;
+        /* safety: prevent infinite loop */
+        if (minute > SIM_TIME + MAX_CUSTOMERS * 10) break;
+    }
+
+    /* 3) Final stats */
+    if (served == 0) {
+        printf("No customers served.\n");
+    } else {
+        double avg_wait = (double)total_wait / served;
+        printf("\n=== Bank Queue Simulation ===\n");
+        printf("Sim minutes (official): %d\n", SIM_TIME);
+        printf("Total minutes simulated (including drain): %d\n", minute);
+        printf("Tellers: %d\n", num_tellers);
+        printf("Customers served: %d\n", served);
+        printf("Average wait time: %.2f minutes\n", avg_wait);
+        printf("Maximum wait time: %d minutes\n", max_wait);
+        printf("=============================\n");
+    }
+
+    return 0;
+}
