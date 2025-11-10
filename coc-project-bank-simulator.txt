@@ -3,111 +3,140 @@
 #include <time.h>
 #include <math.h>
 
-#define MAX_CUSTOMERS 5000
-#define SIM_TIME 480  // 8 hours = 480 minutes
-#define MAX_TELLERS 5
+#define MAX_CUSTOMERS 5000     // Maximum customers that can be handled in a day
+#define SIM_TIME 480           // Total simulation time = 480 minutes (8 hours)
+#define MAX_TELLERS 5          // Maximum tellers available
 
-/* simple Poisson sampler (Knuth) */
+// ---------------------------------------------
+// Function: poisson
+// Purpose : Generate random number of arrivals per minute
+//           using Poisson distribution with parameter λ (lambda)
+// ---------------------------------------------
 int poisson(double lambda) {
     if (lambda <= 0.0) return 0;
-    double L = exp(-lambda);
+    double L = exp(-lambda);    // base for Poisson formula
     int k = 0;
     double p = 1.0;
-    while (p > L) {
+    while (p > L) {             // continue until probability drops below threshold
         k++;
-        double u = rand() / (RAND_MAX + 1.0);
+        double u = rand() / (RAND_MAX + 1.0); // random number between 0 and 1
         p *= u;
     }
-    return k - 1;
+    return k - 1;               // return the number of arrivals
 }
 
 int main() {
-    int queue[MAX_CUSTOMERS];
-    int front = 0, rear = 0;
-    int teller_busy[MAX_TELLERS] = {0};
-    int wait_times[MAX_CUSTOMERS];
+    int queue[MAX_CUSTOMERS];    // queue array to store arrival times
+    int front = 0, rear = 0;     // queue front and rear pointers
+    int teller_busy[MAX_TELLERS] = {0}; // keeps track of how long each teller is busy
+    int wait_times[MAX_CUSTOMERS];       // stores wait time of each served customer
     int total_wait = 0, max_wait = 0, served = 0;
 
-    double lambda;
-    int num_tellers;
+    double lambda;               // average number of customers per minute
+    int num_tellers;             // number of tellers in the bank
 
+    // -------------------------------
+    // User Input Section
+    // -------------------------------
     printf("Enter average customers per minute (lambda, e.g. 0.6): ");
     if (scanf("%lf", &lambda) != 1) return 1;
     printf("Enter number of tellers (1-%d): ", MAX_TELLERS);
     if (scanf("%d", &num_tellers) != 1) return 1;
+
     if (num_tellers < 1) num_tellers = 1;
     if (num_tellers > MAX_TELLERS) num_tellers = MAX_TELLERS;
 
-    srand((unsigned)time(NULL));
+    srand((unsigned)time(NULL)); // seed random number generator
 
-    /* 1) Simulate 480 minutes with arrivals */
+    // ---------------------------------------
+    // 1. SIMULATION LOOP (Minute-by-Minute)
+    // ---------------------------------------
     for (int minute = 0; minute < SIM_TIME; ++minute) {
-        /* generate K arrivals this minute using Poisson(lambda) */
+
+        // --- (A) Customer Arrivals ---
+        // Determine how many customers arrive this minute
         int arrivals = poisson(lambda);
+
+        // Add new arrivals to the queue
         for (int a = 0; a < arrivals; ++a) {
             if (rear >= MAX_CUSTOMERS) {
-                fprintf(stderr, "Queue overflow, increase MAX_CUSTOMERS\n");
+                fprintf(stderr, "Queue overflow! Too many customers.\n");
                 break;
             }
-            queue[rear++] = minute;  // store arrival time
+            queue[rear++] = minute;  // store their arrival time
         }
 
-        /* each teller either continues or picks next customer */
+        // --- (B) Teller Service Logic ---
         for (int t = 0; t < num_tellers; ++t) {
+
             if (teller_busy[t] > 0) {
-                teller_busy[t]--; /* working this minute */
+                teller_busy[t]--; // teller is busy serving
             }
-            if (teller_busy[t] == 0 && front < rear) { /* free and customer waiting */
-                int arrival_time = queue[front++];
-                int wait = minute - arrival_time;
+
+            // If teller is free and there are customers waiting
+            if (teller_busy[t] == 0 && front < rear) {
+                int arrival_time = queue[front++]; // remove first from queue
+                int wait = minute - arrival_time;  // calculate waiting time
+
+                // store and update statistics
                 wait_times[served++] = wait;
                 total_wait += wait;
                 if (wait > max_wait) max_wait = wait;
-                /* assign service time 2 or 3 minutes */
+
+                // assign a random service time between 2–3 minutes
                 teller_busy[t] = 2 + (rand() % 2);
-                /* reduce by 1 because we count current minute as work already */
-                teller_busy[t]--; 
+                teller_busy[t]--;  // count current minute as already worked
                 if (teller_busy[t] < 0) teller_busy[t] = 0;
             }
         }
     }
 
-    /* 2) Drain queue: continue serving until queue empty and all tellers idle */
+    // ---------------------------------------
+    // 2. DRAIN REMAINING QUEUE (After 8 hours)
+    // Continue serving until everyone is done
+    // ---------------------------------------
     int minute = SIM_TIME;
     while (front < rear) {
         for (int t = 0; t < num_tellers; ++t) {
+
             if (teller_busy[t] > 0) {
                 teller_busy[t]--;
             }
+
             if (teller_busy[t] == 0 && front < rear) {
                 int arrival_time = queue[front++];
                 int wait = minute - arrival_time;
+
                 wait_times[served++] = wait;
                 total_wait += wait;
                 if (wait > max_wait) max_wait = wait;
+
                 teller_busy[t] = 2 + (rand() % 2);
-                teller_busy[t]--; 
+                teller_busy[t]--;
                 if (teller_busy[t] < 0) teller_busy[t] = 0;
             }
         }
+
         minute++;
-        /* safety: prevent infinite loop */
+        // safety check to prevent infinite loop
         if (minute > SIM_TIME + MAX_CUSTOMERS * 10) break;
     }
 
-    /* 3) Final stats */
+    // ---------------------------------------
+    // 3. OUTPUT REPORT
+    // ---------------------------------------
     if (served == 0) {
-        printf("No customers served.\n");
+        printf("No customers were served.\n");
     } else {
         double avg_wait = (double)total_wait / served;
-        printf("\n=== Bank Queue Simulation ===\n");
-        printf("Sim minutes (official): %d\n", SIM_TIME);
-        printf("Total minutes simulated (including drain): %d\n", minute);
-        printf("Tellers: %d\n", num_tellers);
+
+        printf("\n===== Bank Queue Simulation Report =====\n");
+        printf("Total simulated time: %d minutes (8 hours)\n", SIM_TIME);
+        printf("Tellers working: %d\n", num_tellers);
         printf("Customers served: %d\n", served);
         printf("Average wait time: %.2f minutes\n", avg_wait);
         printf("Maximum wait time: %d minutes\n", max_wait);
-        printf("=============================\n");
+        printf("========================================\n");
     }
 
     return 0;
